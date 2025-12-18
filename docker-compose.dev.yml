@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - STOCKFISH_PATH=/usr/bin/stockfish
+    # Don't auto-restart in dev mode (so you can see errors)
+    restart: "no"
+    volumes:
+      # Mount source code for live development
+      - .:/app
+      # Prevent venv from being overwritten
+      - /app/venv
+      - /app/__pycache__
+    # DNS configuration to help with connection issues
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    # Override CMD to keep container running for debugging
+    command: tail -f /dev/null
+    # Or run the worker directly:
+    # command: python worker.py
+

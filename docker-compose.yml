@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - STOCKFISH_PATH=/usr/bin/stockfish
+    restart: unless-stopped
+    volumes:
+      # Mount source code for live development (changes reflect immediately)
+      - .:/app
+      # Prevent node_modules/venv from being overwritten
+      - /app/venv
+      - /app/__pycache__
+
