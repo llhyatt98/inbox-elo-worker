@@ -1,6 +1,9 @@
 import os
 import logging
 import resend
+import base64
+import chess
+import chess.svg
 from typing import Dict, Any, Optional
 from datetime import datetime
 from mjml import mjml_to_html
@@ -38,7 +41,7 @@ class EmailService:
                 email_part = email_part.rstrip('>')
                 
                 today_str = datetime.now().strftime("%b %d")
-                return f"{name_part} - {today_str} <{email_part}>"
+                return f"{name_part} ♟️ {today_str} <{email_part}>"
             return self.from_email
         except Exception:
             return self.from_email
@@ -56,12 +59,11 @@ class EmailService:
         username = data.get('username', 'Unknown User')
         status = data.get('status', 'UNKNOWN')
         analysis = data.get('analysis_result')
+        pgn = data.get('pgn', '')
         
         # Colors
-        bg_color = "#f8f7ff"
-        card_color = "#ffffff"
+        bg_color = "#ffffff"
         primary_purple = "#9381ff"
-        accent_purple = "#b8b8ff"
         text_primary = "#1a1a1a"
         text_secondary = "#666666"
         
@@ -81,10 +83,25 @@ class EmailService:
             fen = analysis.get('fen')
             blunder_move = analysis.get('blunder_move')
             best_move = analysis.get('best_move')
-            board_url = f"https://chess-board.fly.dev/render?fen={fen}"
+            
+            # Generate SVG using python-chess
+            board = chess.Board(fen)
+            
+            # Determine orientation
+            orientation = chess.WHITE
+            if pgn and f'[Black "{username}"]' in pgn:
+                orientation = chess.BLACK
+                
+            # Generate SVG
+            svg_content = chess.svg.board(board=board, size=600, orientation=orientation)
+            svg_content = svg_content.replace('width="600"', 'width="100%"').replace('height="600"', 'height="auto"')
             
             analysis_section = f"""
-                    <mj-image src="{board_url}" alt="Chess Position" width="400px" border-radius="12px" css-class="board-shadow" padding-bottom="30px" />
+                    <mj-text padding="0px" align="center">
+                        <div style="margin: 0 auto; max-width: 600px; padding-bottom: 30px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
+                            {svg_content}
+                        </div>
+                    </mj-text>
                     
                     <mj-table padding="0 20px">
                         <tr style="border-bottom: 1px solid #b8b8ff;">
@@ -96,6 +113,12 @@ class EmailService:
                             <td style="padding: 16px 0; text-align: right; color: #10b981; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{best_move}</td>
                         </tr>
                     </mj-table>
+                    
+                    <mj-text padding="0px" align="center">
+                        <div style="margin: 0 auto; max-width: 600px; padding-top: 20px; padding-bottom: 30px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
+                            {svg_content}
+                        </div>
+                    </mj-text>
             """
         elif status == 'NO_BLUNDER':
              analysis_section = f"""
@@ -118,45 +141,32 @@ class EmailService:
                     @import url('https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Mono:400,500');
                 </mj-style>
                 <mj-style inline="inline">
-                    .card-shadow {{
-                        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                    }}
-                    .board-shadow img {{
+                    .board-shadow svg {{
                         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                        border-radius: 12px;
+                        display: block;
                     }}
                 </mj-style>
             </mj-head>
             <mj-body background-color="{bg_color}" width="600px">
                 
-                <!-- Logo Header -->
                 <mj-section padding="40px 0 20px">
                     <mj-column>
-                        <mj-text align="center" color="{primary_purple}" font-size="24px" font-weight="700" letter-spacing="-0.5px">
-                            Inbox Elo
+                        
+                        <!-- Status Header -->
+                        <mj-text align="center" color="{status_color}" font-size="32px" font-weight="700" padding-bottom="12px" letter-spacing="-1px">
+                            {status_title}
                         </mj-text>
+                        
+                        <mj-text align="center" color="{text_secondary}" font-size="16px" padding-bottom="40px">
+                            Analysis for <strong>{username}</strong> — {status_message}
+                        </mj-text>
+
+                        <!-- Dynamic Analysis Content -->
+                        {analysis_section}
+
                     </mj-column>
                 </mj-section>
-
-                <!-- Main Card -->
-                <mj-wrapper padding="0 20px 40px">
-                    <mj-section background-color="{card_color}" border-radius="16px" padding="40px" border-top="4px solid #b8b8ff" css-class="card-shadow">
-                        <mj-column>
-                            
-                            <!-- Status Header -->
-                            <mj-text align="center" color="{status_color}" font-size="32px" font-weight="700" padding-bottom="12px" letter-spacing="-1px">
-                                {status_title}
-                            </mj-text>
-                            
-                            <mj-text align="center" color="{text_secondary}" font-size="16px" padding-bottom="40px">
-                                Analysis for <strong>{username}</strong> — {status_message}
-                            </mj-text>
-
-                            <!-- Dynamic Analysis Content -->
-                            {analysis_section}
-
-                        </mj-column>
-                    </mj-section>
-                </mj-wrapper>
 
                 <!-- Footer -->
                 <mj-section padding="0 0 40px">
