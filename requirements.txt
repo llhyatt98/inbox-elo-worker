@@ -1,4 +1,6 @@
 python-chess>=1.11.2
 psycopg2-binary>=2.9.9
 requests>=2.31.0
+resend>=2.19.0
+mjml[css_inlining]>=0.11.1
 

@@ -13,10 +13,13 @@ from datetime import datetime
 
 import chess
 import chess.engine
+import chess.pgn
+import io
 import requests
 from psycopg2.extras import RealDictCursor
 
 from db import get_db_connection
+from email_service import EmailService
 
 # Configure logging
 logging.basicConfig(
@@ -41,15 +44,38 @@ class ChessAnalysisWorker:
         
         # Stockfish configuration
         self.stockfish_path = os.getenv('STOCKFISH_PATH', '/usr/bin/stockfish')
+        
+        # If configured path doesn't exist, try to find it in PATH or common locations
         if not os.path.exists(self.stockfish_path):
-            logger.warning(f"Stockfish not found at {self.stockfish_path}")
+            import shutil
+            logger.warning(f"Stockfish not found at {self.stockfish_path}, searching in PATH...")
+            
+            # Try shutil.which
+            found_path = shutil.which('stockfish')
+            
+            # Check common locations if not found in PATH
+            if not found_path:
+                for common_path in ['/usr/games/stockfish', '/usr/local/bin/stockfish']:
+                    if os.path.exists(common_path):
+                        found_path = common_path
+                        break
+            
+            if found_path:
+                logger.info(f"Found Stockfish at {found_path}")
+                self.stockfish_path = found_path
+            else:
+                logger.warning("Stockfish not found in any common location")
         
         # Worker configuration
         self.poll_interval = int(os.getenv('POLL_INTERVAL', '5'))
         self.max_retries = int(os.getenv('MAX_RETRIES', '3'))
+        self.dev_mode = os.getenv('DEV_MODE', 'false').lower() == 'true'
         
         # Chess.com API configuration
         self.chess_com_base_url = 'https://api.chess.com/pub'
+        
+        # Initialize email service
+        self.email_service = EmailService()
     
     def poll_for_jobs(self) -> Optional[Dict[str, Any]]:
         """
@@ -61,10 +87,13 @@ class ChessAnalysisWorker:
         try:
             with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Join with users table to get chess_username
                     cur.execute("""
-                        SELECT * FROM analysis_jobs
-                        WHERE status = 'PENDING'
-                        ORDER BY created_at ASC
+                        SELECT aj.*, u.chess_username as username
+                        FROM analysis_jobs aj
+                        JOIN users u ON aj.user_id = u.id
+                        WHERE aj.status = 'PENDING'
+                        ORDER BY aj.created_at ASC
                         LIMIT 1
                     """)
                     row = cur.fetchone()
@@ -86,9 +115,13 @@ class ChessAnalysisWorker:
             PGN string if found, None otherwise.
         """
         try:
+            headers = {
+                'User-Agent': 'DailyChessCoach/1.0 (contact@example.com)'
+            }
+            
             # Get archives
             archives_url = f"{self.chess_com_base_url}/player/{username}/games/archives"
-            archives_response = requests.get(archives_url, timeout=10)
+            archives_response = requests.get(archives_url, headers=headers, timeout=10)
             archives_response.raise_for_status()
             archives = archives_response.json()
             
@@ -100,7 +133,7 @@ class ChessAnalysisWorker:
             current_month_url = archives['archives'][-1]
             
             # Get games for current month
-            games_response = requests.get(current_month_url, timeout=10)
+            games_response = requests.get(current_month_url, headers=headers, timeout=10)
             games_response.raise_for_status()
             games_data = games_response.json()
             
@@ -138,7 +171,7 @@ class ChessAnalysisWorker:
         """
         try:
             board = chess.Board()
-            game = chess.pgn.read_game(chess.pgn.StringIO(pgn))
+            game = chess.pgn.read_game(io.StringIO(pgn))
             
             if not game:
                 logger.error("Failed to parse PGN")
@@ -199,7 +232,7 @@ class ChessAnalysisWorker:
     
     def update_job_status(
         self,
-        job_id: int,
+        job_id: str,
         status: str,
         analysis_result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None
@@ -208,7 +241,7 @@ class ChessAnalysisWorker:
         Update the job status in the database.
         
         Args:
-            job_id: The job ID to update
+            job_id: The job ID to update (UUID)
             status: New status ('COMPLETED', 'FAILED', etc.)
             analysis_result: Optional analysis result data
             error: Optional error message
@@ -221,7 +254,8 @@ class ChessAnalysisWorker:
                     values = [status, datetime.utcnow()]
                     
                     if analysis_result:
-                        updates.append('analysis_data = %s')
+                        # Schema has analysis_result column, not analysis_data
+                        updates.append('analysis_result = %s')
                         values.append(json.dumps(analysis_result))
                     
                     if error:
@@ -244,7 +278,7 @@ class ChessAnalysisWorker:
         except Exception as e:
             logger.error(f"Error updating job status: {e}")
     
-    def process_job(self, job: Dict[str, Any]) -> bool:
+    def process_job(self, job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Process a single analysis job.
         
@@ -252,43 +286,82 @@ class ChessAnalysisWorker:
             job: Job dictionary from Supabase
             
         Returns:
-            True if successful, False otherwise
+            Dictionary with job results if successful, None otherwise
         """
         job_id = job.get('id')
         username = job.get('username')
         
         if not username:
             logger.error(f"Job {job_id} missing username")
-            self.update_job_status(job_id, 'FAILED', error='Missing username')
-            return False
+            # self.update_job_status(job_id, 'FAILED', error='Missing username')
+            return None
         
         logger.info(f"Processing job {job_id} for user {username}")
         
         # Fetch latest game
         pgn = self.fetch_latest_game(username)
         if not pgn:
-            self.update_job_status(job_id, 'FAILED', error='Failed to fetch game')
-            return False
+            logger.error(f"Failed to fetch game for job {job_id}")
+            # self.update_job_status(job_id, 'FAILED', error='Failed to fetch game')
+            return None
+            
+        logger.info(f"Successfully fetched game for {username}. PGN length: {len(pgn)}")
+        logger.info(f"Game preview: {pgn[:100]}...")
         
         # Analyze game
         analysis_result = self.analyze_game(pgn)
         if not analysis_result:
-            self.update_job_status(job_id, 'COMPLETED', error='No blunder found')
-            return True
+            logger.info(f"Analysis complete (no blunder found) for job {job_id}")
+            # self.update_job_status(job_id, 'COMPLETED', error='No blunder found')
+            return {
+                'job_id': job_id,
+                'username': username,
+                'pgn': pgn,
+                'analysis_result': None,
+                'status': 'NO_BLUNDER'
+            }
         
         # Save results
-        self.update_job_status(job_id, 'COMPLETED', analysis_result=analysis_result)
+        logger.info(f"Analysis complete (blunder found) for job {job_id}")
+        logger.info(f"Stockfish Findings: {json.dumps(analysis_result, indent=2)}")
+        # self.update_job_status(job_id, 'COMPLETED', analysis_result=analysis_result)
         
         # TODO: Trigger email notification if configured
         # self.send_notification(job, analysis_result)
         
-        return True
+        return {
+            'job_id': job_id,
+            'username': username,
+            'pgn': pgn,
+            'analysis_result': analysis_result,
+            'status': 'BLUNDER_FOUND'
+        }
     
     def run(self):
         """Main worker loop."""
         logger.info("Starting Chess Analysis Worker")
         logger.info(f"Stockfish path: {self.stockfish_path}")
         logger.info(f"Poll interval: {self.poll_interval} seconds")
+        
+        if self.dev_mode:
+            logger.info("Running in DEV MODE")
+            try:
+                job = self.poll_for_jobs()
+                if job:
+                    result = self.process_job(job)
+                    if result:
+                        print("\n=== DEV MODE OUTPUT ===")
+                        print(json.dumps(result, indent=2))
+                        print("=======================\n")
+                        
+                        # Send email
+                        logger.info("Sending email with analysis results...")
+                        self.email_service.send_analysis_results(result)
+                else:
+                    logger.info("No pending jobs found for dev mode")
+            except Exception as e:
+                logger.error(f"Error in dev mode: {e}")
+            return
         
         while True:
             try:
@@ -298,7 +371,7 @@ class ChessAnalysisWorker:
                 if job:
                     self.process_job(job)
                 else:
-                    logger.debug("No pending jobs found")
+                    logger.info("No pending jobs found")
                 
                 # Wait before next poll
                 time.sleep(self.poll_interval)
