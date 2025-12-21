@@ -21,7 +21,7 @@ class EmailService:
         else:
             resend.api_key = self.api_key
             
-        self.from_email = os.getenv('FROM_EMAIL', 'Daily Chess Coach <team@support.inboxelo.com>')
+        self.from_email = os.getenv('FROM_EMAIL', 'Inbox Elo <team@support.inboxelo.com>')
         self.to_email = os.getenv('TO_EMAIL', 'admin@cognientai.com')
 
     def _get_formatted_from_email(self) -> str:
@@ -34,14 +34,10 @@ class EmailService:
             if '<' in self.from_email and '>' in self.from_email:
                 name_part, email_part = self.from_email.split('<', 1)
                 name_part = name_part.strip()
-                # Remove "Daily Chess Coach" if it's there to avoid duplication if user configured it
-                if name_part == "Daily Chess Coach":
-                    name_part = "Inbox Elo"
-                
                 email_part = email_part.rstrip('>')
-                
                 today_str = datetime.now().strftime("%b %d")
-                return f"{name_part} ♟️ {today_str} <{email_part}>"
+
+                return f"Inbox Elo ♟️ {today_str} <{email_part}>"
             return self.from_email
         except Exception:
             return self.from_email
@@ -61,19 +57,25 @@ class EmailService:
         analysis = data.get('analysis_result')
         pgn = data.get('pgn', '')
         
-        # Colors
-        bg_color = "#ffffff"
-        primary_purple = "#9381ff"
-        text_primary = "#1a1a1a"
-        text_secondary = "#666666"
+        # Colors - Google/Frontend Theme
+        page_bg = "#F8F9FA"       # Surface
+        bg_color = "#FFFFFF"      # Background
+        text_primary = "#202124"  # Dark Text / Headers
+        text_secondary = "#5F6368" # Body Text
+        text_subtle = "#9AA0A6"   # Subtle Text
+        
+        # Semantic Colors
+        color_brand = "#1A73E8"   # Google Blue
+        color_error = "#D93025"   # Google Red
+        color_success = "#1E8E3E" # Google Green
         
         # Determine theme colors and messages
         if status == 'NO_BLUNDER':
-            status_color = "#10b981" # Soft Emerald Green
+            status_color = color_success
             status_title = "Great Game!"
             status_message = "No significant blunders were detected by the engine."
         else:
-            status_color = primary_purple # Brand Purple for alert
+            status_color = color_error
             status_title = "Blunder Alert"
             status_message = "A critical moment was found in your game."
 
@@ -105,12 +107,12 @@ class EmailService:
                     
                     <mj-table padding="0 20px">
                         <tr style="border-bottom: 1px solid #b8b8ff;">
-                            <td style="padding: 16px 0; color: #666666; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Your Move</td>
-                            <td style="padding: 16px 0; text-align: right; color: #ef4444; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{blunder_move}</td>
+                            <td style="padding: 16px 0; color: {text_secondary}; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Your Move</td>
+                            <td style="padding: 16px 0; text-align: right; color: {color_error}; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{blunder_move}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 16px 0; color: #666666; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Best Move</td>
-                            <td style="padding: 16px 0; text-align: right; color: #10b981; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{best_move}</td>
+                            <td style="padding: 16px 0; color: {text_secondary}; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Best Move</td>
+                            <td style="padding: 16px 0; text-align: right; color: {color_success}; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{best_move}</td>
                         </tr>
                     </mj-table>
                     
@@ -132,6 +134,13 @@ class EmailService:
             <mj-head>
                 <mj-title>Chess Analysis - {username}</mj-title>
                 <mj-preview>Analysis results for your recent game vs {username}</mj-preview>
+                
+                <!-- Force Light Mode -->
+                <mj-raw>
+                    <meta name="color-scheme" content="light">
+                    <meta name="supported-color-schemes" content="light">
+                </mj-raw>
+                
                 <mj-attributes>
                     <mj-all font-family="Roboto, Helvetica, Arial, sans-serif"></mj-all>
                     <mj-text font-weight="400" font-size="16px" color="{text_primary}" line-height="24px"></mj-text>
@@ -146,19 +155,36 @@ class EmailService:
                         border-radius: 12px;
                         display: block;
                     }}
+                    .logo-text {{
+                        font-size: 26px;
+                        font-weight: 700;
+                        color: {text_primary};
+                        line-height: 48px;
+                        margin-left: 16px;
+                        display: inline-block;
+                        vertical-align: middle;
+                    }}
+                    .logo-container {{
+                        display: inline-block;
+                        vertical-align: middle;
+                    }}
+                </mj-style>
+                <!-- CSS to force light background in dark mode clients -->
+                <mj-style>
+                    body {{ background-color: {page_bg} !important; }}
+                    .mj-body {{ background-color: {page_bg} !important; }}
                 </mj-style>
             </mj-head>
-            <mj-body background-color="{bg_color}" width="600px">
+            <mj-body background-color="{page_bg}" width="600px">
                 
-                <mj-section padding="40px 0 20px">
+                <!-- Spacer -->
+                <mj-section padding="20px 0"></mj-section>
+                
+                <!-- Main Content Card -->
+                <mj-section background-color="{bg_color}" padding="48px 0 40px" border-radius="16px">
                     <mj-column>
                         
-                        <!-- Status Header -->
-                        <mj-text align="center" color="{status_color}" font-size="32px" font-weight="700" padding-bottom="12px" letter-spacing="-1px">
-                            {status_title}
-                        </mj-text>
-                        
-                        <mj-text align="center" color="{text_secondary}" font-size="16px" padding-bottom="40px">
+                        <mj-text align="center" color="{text_secondary}" font-size="16px" padding-bottom="48px">
                             Analysis for <strong>{username}</strong> — {status_message}
                         </mj-text>
 
@@ -169,10 +195,10 @@ class EmailService:
                 </mj-section>
 
                 <!-- Footer -->
-                <mj-section padding="0 0 40px">
+                <mj-section padding="24px 0 40px">
                     <mj-column>
-                        <mj-text align="center" color="#9CA3AF" font-size="12px">
-                            © 2024 Daily Chess Coach. All rights reserved.
+                        <mj-text align="center" color="{text_subtle}" font-size="12px">
+                            © 2024 Inbox Elo. All rights reserved.
                         </mj-text>
                     </mj-column>
                 </mj-section>
@@ -196,9 +222,8 @@ class EmailService:
 
         try:
             username = result.get('username', 'Unknown User')
-            status = result.get('status', 'UNKNOWN')
             
-            subject = f"Chess Analysis for {username}: {status}"
+            subject = f"Chess Analysis for {username}"
             
             # Generate MJML template
             mjml_content = self._get_mjml_template(result)
