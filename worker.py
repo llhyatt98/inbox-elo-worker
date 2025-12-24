@@ -11,6 +11,7 @@ import json
 from typing import Optional, Dict, Any
 from datetime import datetime
 
+import re
 import requests
 from psycopg2.extras import RealDictCursor
 
@@ -35,7 +36,6 @@ class ChessAnalysisWorker:
         try:
             conn = get_db_connection()
             conn.close()
-            logger.info("Database connection verified")
         except Exception as e:
             raise ValueError(f"Failed to connect to database: {e}")
         
@@ -58,7 +58,7 @@ class ChessAnalysisWorker:
                         break
             
             if found_path:
-                logger.info(f"Found Stockfish at {found_path}")
+                # logger.info(f"Found Stockfish at {found_path}")
                 self.stockfish_path = found_path
             else:
                 logger.warning("Stockfish not found in any common location")
@@ -234,11 +234,20 @@ class ChessAnalysisWorker:
             # self.update_job_status(job_id, 'FAILED', error='Failed to fetch game')
             return None
             
-        logger.info(f"Successfully fetched game for {username}. PGN length: {len(pgn)}")
-        logger.info(f"Game preview: {pgn[:100]}...")
+        logger.info(f"Successfully fetched game for {username}")
+        
+        # Parse players for logging
+        white = "Unknown"
+        black = "Unknown"
+        white_match = re.search(r'\[White "(.*?)"\]', pgn)
+        black_match = re.search(r'\[Black "(.*?)"\]', pgn)
+        if white_match: white = white_match.group(1)
+        if black_match: black = black_match.group(1)
+        
+        logger.info(f"Game fetched: {white} vs {black}")
         
         # Analyze game
-        analysis_result = self.analysis_service.analyze_game(pgn)
+        analysis_result = self.analysis_service.analyze_game(pgn, username)
         if not analysis_result:
             logger.info(f"Analysis complete (no blunder found) for job {job_id}")
             # self.update_job_status(job_id, 'COMPLETED', error='No blunder found')
@@ -252,7 +261,7 @@ class ChessAnalysisWorker:
         
         # Save results
         logger.info(f"Analysis complete (blunder found) for job {job_id}")
-        logger.info(f"Stockfish Findings: {json.dumps(analysis_result, indent=2)}")
+        
         # self.update_job_status(job_id, 'COMPLETED', analysis_result=analysis_result)
         
         # TODO: Trigger email notification if configured
@@ -269,8 +278,6 @@ class ChessAnalysisWorker:
     def run(self):
         """Main worker loop."""
         logger.info("Starting Chess Analysis Worker")
-        logger.info(f"Stockfish path: {self.stockfish_path}")
-        logger.info(f"Poll interval: {self.poll_interval} seconds")
         
         if self.dev_mode:
             logger.info("Running in DEV MODE")
@@ -279,12 +286,7 @@ class ChessAnalysisWorker:
                 if job:
                     result = self.process_job(job)
                     if result:
-                        print("\n=== DEV MODE OUTPUT ===")
-                        print(json.dumps(result, indent=2))
-                        print("=======================\n")
-                        
                         # Send email
-                        logger.info("Sending email with analysis results...")
                         self.email_service.send_analysis_results(result)
                 else:
                     logger.info("No pending jobs found for dev mode")

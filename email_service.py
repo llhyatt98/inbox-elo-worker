@@ -4,6 +4,7 @@ import resend
 import base64
 import chess
 import chess.svg
+import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 from mjml import mjml_to_html
@@ -70,14 +71,33 @@ class EmailService:
         color_success = "#1E8E3E" # Google Green
         
         # Determine theme colors and messages
+        opponent = "Unknown Opponent"
+        game_date = "Unknown Date"
+
+        if pgn:
+            white_match = re.search(r'\[White "(.*?)"\]', pgn)
+            black_match = re.search(r'\[Black "(.*?)"\]', pgn)
+            date_match = re.search(r'\[Date "(.*?)"\]', pgn)
+            
+            white = white_match.group(1) if white_match else "Unknown"
+            black = black_match.group(1) if black_match else "Unknown"
+            
+            if username == white:
+                opponent = black
+            else:
+                opponent = white
+                
+            if date_match:
+                game_date = date_match.group(1)
+
         if status == 'NO_BLUNDER':
             status_color = color_success
             status_title = "Great Game!"
-            status_message = "No significant blunders were detected by the engine."
+            status_message = f"No significant blunders were detected by the engine in your game against <strong>{opponent}</strong> on <strong>{game_date}</strong>."
         else:
             status_color = color_error
             status_title = "Blunder Alert"
-            status_message = "A critical moment was found in your game."
+            status_message = f"A critical moment was found in your game against <strong>{opponent}</strong> on <strong>{game_date}</strong>."
 
         # Build dynamic sections
         analysis_section = ""
@@ -85,41 +105,87 @@ class EmailService:
             fen = analysis.get('fen')
             blunder_move = analysis.get('blunder_move')
             best_move = analysis.get('best_move')
+            blunder_score = analysis.get('blunder_score', 0.0)
+            best_score = analysis.get('best_score', 0.0)
             
-            # Generate SVG using python-chess
+            # Generate SVG for Blunder (Player's Move)
             board = chess.Board(fen)
+            blunder_move_obj = chess.Move.from_uci(blunder_move)
+            
+            # Make the blunder move on the board to show the resulting position
+            board.push(blunder_move_obj)
             
             # Determine orientation
             orientation = chess.WHITE
             if pgn and f'[Black "{username}"]' in pgn:
                 orientation = chess.BLACK
                 
-            # Generate SVG
-            svg_content = chess.svg.board(board=board, size=600, orientation=orientation)
-            svg_content = svg_content.replace('width="600"', 'width="100%"').replace('height="600"', 'height="auto"')
+            # Configure visual styles
+            board_size = 600
+            highlight_color = "#b9d3ed80"  # Transparent blue for highlights
+            arrow_color = "#D93025"        # Red for blunder
+            best_arrow_color = "#1E8E3E"   # Green for best move
+            
+            # 1. Player's Blunder Board
+            # Highlight the squares involved in the blunder move (from -> to)
+            fill_blunder = {
+                blunder_move_obj.from_square: highlight_color,
+                blunder_move_obj.to_square: highlight_color
+            }
+            
+            svg_blunder = chess.svg.board(
+                board=board,
+                size=board_size,
+                orientation=orientation,
+                lastmove=blunder_move_obj,
+                fill=fill_blunder,
+                arrows=[],
+                coordinates=True
+            )
+            svg_blunder = svg_blunder.replace(f'width="{board_size}"', 'width="100%"').replace(f'height="{board_size}"', 'height="auto"')
+
+            # 2. Best Move Board
+            # Reset board and make the best move instead
+            board.pop() # Undo blunder
+            
+            best_move_obj = None
+            svg_best = ""
+            
+            if best_move:
+                best_move_obj = chess.Move.from_uci(best_move)
+                board.push(best_move_obj)
+                
+                fill_best = {
+                    best_move_obj.from_square: highlight_color,
+                    best_move_obj.to_square: highlight_color
+                }
+                
+                svg_best = chess.svg.board(
+                    board=board, 
+                    size=board_size, 
+                    orientation=orientation,
+                    lastmove=best_move_obj,
+                    fill=fill_best,
+                    arrows=[],
+                    coordinates=True
+                )
+                svg_best = svg_best.replace(f'width="{board_size}"', 'width="100%"').replace(f'height="{board_size}"', 'height="auto"')
             
             analysis_section = f"""
                     <mj-text padding="0px" align="center">
-                        <div style="margin: 0 auto; max-width: 600px; padding-bottom: 30px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
-                            {svg_content}
+                        <div style="margin: 0 auto; max-width: 600px; padding-bottom: 10px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
+                            {svg_blunder}
                         </div>
+                        <p style="color: {text_primary}; font-size: 16px; font-weight: 500; margin-top: 10px; margin-bottom: 5px;">Your Move: <span style="color: {color_error};">{blunder_move}</span></p>
+                        <p style="color: {text_secondary}; font-size: 14px; margin-bottom: 30px;">This move resulted in {blunder_score:+.2f}</p>
                     </mj-text>
                     
-                    <mj-table padding="0 20px">
-                        <tr style="border-bottom: 1px solid #b8b8ff;">
-                            <td style="padding: 16px 0; color: {text_secondary}; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Your Move</td>
-                            <td style="padding: 16px 0; text-align: right; color: {color_error}; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{blunder_move}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 16px 0; color: {text_secondary}; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500;">Best Move</td>
-                            <td style="padding: 16px 0; text-align: right; color: {color_success}; font-family: 'Roboto Mono', monospace; font-size: 18px; font-weight: 500;">{best_move}</td>
-                        </tr>
-                    </mj-table>
-                    
                     <mj-text padding="0px" align="center">
-                        <div style="margin: 0 auto; max-width: 600px; padding-top: 20px; padding-bottom: 30px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
-                            {svg_content}
+                        <div style="margin: 0 auto; max-width: 600px; padding-top: 10px; padding-bottom: 10px; padding-left: 10px; padding-right: 10px;" class="board-shadow">
+                            {svg_best}
                         </div>
+                        <p style="color: {text_primary}; font-size: 16px; font-weight: 500; margin-top: 10px; margin-bottom: 5px;">Best Move: <span style="color: {color_success};">{best_move}</span></p>
+                        <p style="color: {text_secondary}; font-size: 14px; margin-bottom: 30px;">The best move would have resulted in {best_score:+.2f}</p>
                     </mj-text>
             """
         elif status == 'NO_BLUNDER':
@@ -232,7 +298,7 @@ class EmailService:
             mjml_result = mjml_to_html(mjml_content)
             html_content = mjml_result.html
             
-            logger.info(f"Sending email to {self.to_email} for user {username}")
+            # logger.info(f"Sending email to {self.to_email} for user {username}")
             
             r = resend.Emails.send({
                 "from": self._get_formatted_from_email(),
@@ -241,7 +307,7 @@ class EmailService:
                 "html": html_content
             })
             
-            logger.info(f"Email sent successfully. ID: {r.get('id')}")
+            logger.info(f"Email sent successfully.")
             return r
             
         except Exception as e:

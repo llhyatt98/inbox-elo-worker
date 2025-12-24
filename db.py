@@ -69,7 +69,7 @@ def get_db_connection():
     ipv4_address = resolve_hostname_to_ipv4(hostname)
     
     # Connect using individual parameters with IPv4 address
-    logger.debug(f"Connecting to {username}@{ipv4_address}:{port}/{database}")
+    # logger.debug(f"Connecting to {username}@{ipv4_address}:{port}/{database}")
     return psycopg2.connect(
         host=ipv4_address,  # Use IPv4 address instead of hostname
         port=int(port),
