@@ -23,7 +23,6 @@ class EmailService:
             resend.api_key = self.api_key
             
         self.from_email = os.getenv('FROM_EMAIL', 'Inbox Elo <team@support.inboxelo.com>')
-        self.to_email = os.getenv('TO_EMAIL', 'admin@cognientai.com')
 
     def _get_formatted_from_email(self) -> str:
         """
@@ -199,7 +198,6 @@ class EmailService:
         <mjml>
             <mj-head>
                 <mj-title>Chess Analysis - {username}</mj-title>
-                <mj-preview>Analysis results for your recent game vs {username}</mj-preview>
                 
                 <!-- Force Light Mode -->
                 <mj-raw>
@@ -288,6 +286,11 @@ class EmailService:
 
         try:
             username = result.get('username', 'Unknown User')
+            user_email = result.get('email')
+            
+            if not user_email:
+                logger.error(f"Cannot send email: No email address found for user {username}")
+                return None
             
             subject = f"Chess Analysis for {username}"
             
@@ -298,11 +301,11 @@ class EmailService:
             mjml_result = mjml_to_html(mjml_content)
             html_content = mjml_result.html
             
-            # logger.info(f"Sending email to {self.to_email} for user {username}")
+            # logger.info(f"Sending email to {user_email} for user {username}")
             
             r = resend.Emails.send({
                 "from": self._get_formatted_from_email(),
-                "to": self.to_email,
+                "to": user_email,
                 "subject": subject,
                 "html": html_content
             })
