@@ -63,6 +63,14 @@ def get_db_connection():
     
     # Validate all required parameters
     if not all([hostname, username, password, database]):
+        # DEBUGGING: Print what we DO have
+        print("--- DEBUG ENV VARS ---")
+        print(f"DB_HOST present: {bool(hostname)}")
+        print(f"DB_USER present: {bool(username)}")
+        print(f"DB_PASSWORD present: {bool(password)}")
+        print(f"DB_NAME present: {bool(database)}")
+        # print("All Environment Keys:", list(os.environ.keys())) # Uncomment if needed
+        print("----------------------")
         raise ValueError("Missing required database connection parameters")
     
     # Resolve hostname to IPv4 explicitly
