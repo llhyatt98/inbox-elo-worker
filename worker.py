@@ -82,7 +82,7 @@ class ChessAnalysisWorker:
     
     def poll_for_jobs(self) -> Optional[Dict[str, Any]]:
         """
-        Poll database for pending analysis jobs.
+        Poll database for pending analysis jobs and claim one atomically.
         
         Returns:
             A job dictionary if found, None otherwise.
@@ -90,20 +90,31 @@ class ChessAnalysisWorker:
         try:
             with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # Join with users table to get chess_username
+                    # Atomic FETCH and UPDATE
+                    # This finds a candidate, updates its last_run_at immediately to "lock" it
+                    # from other workers, and returns the job details.
                     cur.execute("""
-                        SELECT aj.*, u.chess_username as username, u.email
-                        FROM analysis_jobs aj
-                        JOIN users u ON aj.user_id = u.id
-                        WHERE aj.status = 'PENDING'
-                        AND (
-                            aj.last_run_at IS NULL 
-                            OR aj.last_run_at <= NOW() - aj.run_interval
+                        UPDATE analysis_jobs
+                        SET last_run_at = NOW()
+                        WHERE id = (
+                            SELECT aj.id
+                            FROM analysis_jobs aj
+                            WHERE aj.status = 'PENDING'
+                            AND (
+                                aj.last_run_at IS NULL 
+                                OR aj.last_run_at <= NOW() - aj.run_interval
+                            )
+                            ORDER BY aj.created_at ASC
+                            FOR UPDATE SKIP LOCKED
+                            LIMIT 1
                         )
-                        ORDER BY aj.created_at ASC
-                        LIMIT 1
+                        RETURNING *, 
+                        (SELECT chess_username FROM users WHERE id = analysis_jobs.user_id) as username,
+                        (SELECT email FROM users WHERE id = analysis_jobs.user_id) as email
                     """)
                     row = cur.fetchone()
+                    conn.commit() # Important: Commit the "lock" immediately
+                    
                     if row:
                         return dict(row)
                     return None
