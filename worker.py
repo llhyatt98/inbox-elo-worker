@@ -387,8 +387,6 @@ class ChessAnalysisWorker:
                         else:
                             logger.info("Email sending disabled by configuration - Updating last_run_at anyway")
                             self.update_last_run(job['id'])
-                else:
-                    logger.info("No pending jobs found")
                 
                 # Wait before next poll
                 time.sleep(self.poll_interval)
