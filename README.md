@@ -29,10 +29,6 @@ The worker performs the following "Job" loop:
 4. **Save:** Updates the Supabase row with `status` = 'COMPLETED' and saves the `fen` (board state), `blunder_move`, and `best_move` to a JSON column.
 5. **Notify:** (Optional step) Triggers the transactional email via Postmark/Resend.
 
-## Environment Constraints
-- **Stockfish Path:** Must handle environment variables (`STOCKFISH_PATH`) to distinguish between local development (macOS binary) and production (Linux binary in Docker).
-- **Rate Limiting:** Must respect Chess.com's API headers to avoid bans.
-
 ## Development Setup
 
 ### Prerequisites
