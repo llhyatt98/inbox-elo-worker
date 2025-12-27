@@ -367,8 +367,6 @@ class ChessAnalysisWorker:
                         else:
                             logger.info("Email sending disabled by configuration - Updating last_run_at anyway")
                             self.update_last_run(job['id'])
-                else:
-                    logger.info(f"No pending jobs found for {self.dev_email}")
             except Exception as e:
                 logger.error(f"Error in dev mode: {e}")
             return

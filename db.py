@@ -60,7 +60,25 @@ def get_db_connection():
     password = os.getenv('DB_PASSWORD')
     database = os.getenv('DB_NAME')
     port = os.getenv('DB_PORT', '5432')
-    
+
+    # Fallback: Try DATABASE_URL
+    if not hostname and os.getenv('DATABASE_URL'):
+        try:
+            db_url = os.getenv('DATABASE_URL')
+            # Handle postgres:// vs postgresql://
+            if db_url.startswith('postgres://'):
+                db_url = db_url.replace('postgres://', 'postgresql://', 1)
+                
+            parsed = urlparse(db_url)
+            hostname = parsed.hostname
+            username = parsed.username
+            password = unquote(parsed.password) if parsed.password else None
+            database = parsed.path.lstrip('/')
+            port = parsed.port or 5432
+            logger.info("Configuration loaded from DATABASE_URL")
+        except Exception as e:
+            logger.warning(f"Failed to parse DATABASE_URL: {e}")
+
     # Validate all required parameters
     if not all([hostname, username, password, database]):
         # DEBUGGING: Print what we DO have
